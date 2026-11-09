@@ -8,7 +8,7 @@ import win32service
 import win32serviceutil
 import uvicorn
 
-from bridge import create_app
+from bridge import create_app, validate_listen_host
 from config import load_targets, mock_targets
 
 
@@ -35,6 +35,7 @@ class BridgeService(win32serviceutil.ServiceFramework):
             )
         ).resolve()
         config = json.loads(path.read_text(encoding="utf-8"))
+        host = validate_listen_host(config.get("host", "127.0.0.1"))
         resolve = lambda value: (path.parent / value).resolve()
         token = resolve(config["token_file"]).read_text(encoding="utf-8").strip()
         targets = (
@@ -44,7 +45,7 @@ class BridgeService(win32serviceutil.ServiceFramework):
         )
         app = create_app(token, data_dir=resolve(config["data_dir"]), targets=targets)
         self.server = uvicorn.Server(
-            uvicorn.Config(app, host="127.0.0.1", port=config.get("port", 19827), access_log=False)
+            uvicorn.Config(app, host=host, port=config.get("port", 19827), access_log=False)
         )
         if not self.stopping:
             self.server.run()

@@ -1,6 +1,7 @@
 {
   "token_file": "secrets/bridge.token",
   "data_dir": "data",
+  "host": "127.0.0.1",
   "port": 19827,
   "mock": true
 }

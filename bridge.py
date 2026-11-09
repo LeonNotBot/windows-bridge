@@ -38,6 +38,11 @@ def error(code, message, status=400):
     raise HTTPException(status, {"code": code, "message": message, "retryable": False})
 
 
+def validate_listen_host(host: str) -> str:
+    """Accept explicit listen IPs, retaining loopback as the caller's default."""
+    return str(ipaddress.ip_address(host))
+
+
 def create_app(token: str, *, data_dir=None, targets=None) -> FastAPI:
     if len(token) < 32:
         raise ValueError("Token must contain at least 32 characters")
@@ -302,7 +307,10 @@ def create_app(token: str, *, data_dir=None, targets=None) -> FastAPI:
 def main():
     parser = argparse.ArgumentParser(description="Windows Bridge")
     parser.add_argument("--token-file", required=True, type=Path)
-    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument(
+        "--host", default="127.0.0.1",
+        help="Listen IP (default: 127.0.0.1); set the LAN IP to accept remote Workers",
+    )
     parser.add_argument("--port", type=int, default=19827)
     parser.add_argument("--data-dir", type=Path, default=Path("data"))
     group = parser.add_mutually_exclusive_group(required=True)
@@ -310,8 +318,7 @@ def main():
     group.add_argument("--config", type=Path)
     args = parser.parse_args()
     try:
-        if not ipaddress.ip_address(args.host).is_loopback:
-            parser.error("Only loopback addresses are supported; use a secure tunnel")
+        host = validate_listen_host(args.host)
         app = create_app(
             args.token_file.read_text(encoding="utf-8").strip(),
             data_dir=args.data_dir,
@@ -319,7 +326,7 @@ def main():
         )
     except (OSError, UnicodeError, ValueError):
         parser.error("Invalid token file, target configuration or listen address")
-    uvicorn.run(app, host=args.host, port=args.port, access_log=False)
+    uvicorn.run(app, host=host, port=args.port, access_log=False)
 
 
 if __name__ == "__main__":

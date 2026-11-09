@@ -1,0 +1,45 @@
+{
+  "targets": [
+    {
+      "id": "mock-knowledge-base",
+      "script": "connectors/mock_benchmark.py",
+      "sha256": "dc8156c46851ce5ba0c7351f164928d4133d13d7ce247683bb8f4dad8f074a96",
+      "benchmarks": [
+        "mock-kb",
+        "mock-meeting",
+        "mock-failure",
+        "mock-crash",
+        "mock-invalid",
+        "mock-timeout"
+      ],
+      "result_mode": "file",
+      "timeout_seconds": 300
+    },
+    {
+      "id": "mock-fw-coding-report",
+      "script": "connectors/mock_fw_report.py",
+      "sha256": "a67bffe784e3e4a172446ad51b3c41d0a54bc0906f60245c40d70f085131f8d3",
+      "benchmarks": [
+        "smoke",
+        "slow",
+        "crash",
+        "missing-report",
+        "invalid-progress",
+        "no-progress",
+        "html",
+        "manual"
+      ],
+      "result_mode": "report",
+      "report_file": "report.md",
+      "allowed_arguments": [
+        "--cases",
+        "--note"
+      ],
+      "allowed_switches": [
+        "--include-log"
+      ],
+      "timeout_seconds": 3600,
+      "argument_mode": "passthrough"
+    }
+  ]
+}

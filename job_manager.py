@@ -1,8 +1,12 @@
 import asyncio
 from dataclasses import replace
+import logging
+import traceback
 
 from connectors.python_script import execute
 from job_store import TERMINAL
+
+logger = logging.getLogger("uvicorn.error")
 
 
 class Manager:
@@ -93,6 +97,10 @@ class Manager:
                 },
             )
         except Exception:
+            diagnostic = traceback.format_exc()
+            if self.token:
+                diagnostic = diagnostic.replace(self.token, "[REDACTED]")
+            logger.error("Bridge job %s failed unexpectedly:\n%s", job_id, diagnostic)
             self.store.transition(
                 job_id,
                 "failed",

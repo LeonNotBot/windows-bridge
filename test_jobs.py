@@ -95,3 +95,25 @@ def test_no_arbitrary_script_or_benchmark():
         )
         assert client.post("/v1/jobs", json=request(benchmark="not-configured")).status_code == 422
         assert client.get("/v1/targets/mock-knowledge-base").json()["max_concurrency"] == 1
+
+
+def test_internal_exception_logged_without_token_or_api_traceback(monkeypatch, caplog, tmp_path):
+    import job_manager
+
+    async def broken_connector(*args, **kwargs):
+        raise RuntimeError("Simulated connector failure " + TOKEN)
+
+    monkeypatch.setattr(job_manager, "execute", broken_connector)
+    with TestClient(
+        create_app(TOKEN, data_dir=tmp_path, targets=mock_targets()), headers=HEADERS
+    ) as client:
+        job = client.post("/v1/jobs", json=request("internal-error")).json()["job_id"]
+        assert wait(client, job)["error"]["code"] == "CONNECTOR_INTERNAL_ERROR"
+        result = client.get(f"/v1/jobs/{job}/result")
+        assert result.json()["status"] == "failed"
+        assert TOKEN not in result.text
+        assert "Traceback" not in result.text
+        assert "Simulated connector failure" not in result.text
+    assert f"Bridge job {job} failed unexpectedly" in caplog.text
+    assert "RuntimeError: Simulated connector failure [REDACTED]" in caplog.text
+    assert TOKEN not in caplog.text

@@ -1,6 +1,7 @@
 import asyncio
 from dataclasses import replace
 import logging
+import hashlib
 import traceback
 
 from connectors.python_script import execute
@@ -37,6 +38,17 @@ class Manager:
                         target.timeout_seconds, state["timeout_seconds"]
                     ),
                 )
+                input_file = None
+                if state["operation"] == "finalize_report":
+                    from artifacts import safe
+                    item = state["input_artifacts"][0]
+                    input_file = self.root / "artifacts" / item["artifact_id"]
+                    if (not safe(input_file) or input_file.parent.resolve() != input_file.parent
+                            or hashlib.sha256(input_file.read_bytes()).hexdigest() != item["sha256"]):
+                        raise ValueError("Input workbook failed integrity verification")
+                    target = replace(target, script=target.review_script,
+                                     argument_template=target.review_argument_template,
+                                     report_file="report.md")
 
                 async def progress(value):
                     if self.token:
@@ -63,6 +75,7 @@ class Manager:
                     arguments=state["input"].get("arguments", []),
                     collect_report=collect,
                     on_progress=progress,
+                    input_file=input_file,
                 )
 
                 def redact(value):

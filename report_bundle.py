@@ -102,6 +102,7 @@ def collect(directory, target, store, root):
                 "main_artifact_id": main_id,
                 "files": files,
                 "requires_review": (directory / "review.required").is_file(),
+                "review_report_supported": target.review_script is not None,
             },
             "error": None,
         }

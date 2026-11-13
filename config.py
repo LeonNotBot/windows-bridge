@@ -26,6 +26,7 @@ def load_targets(path):
             "allowed_switches",
             "working_dir",
             "argument_mode",
+            "review_script", "review_sha256", "review_argument_template",
         }:
             raise ValueError("Unknown target configuration field")
         key = item["id"]
@@ -37,12 +38,18 @@ def load_targets(path):
             or hashlib.sha256(script.read_bytes()).hexdigest() != item["sha256"]
         ):
             raise ValueError("Script hash mismatch")
-        options = {k: v for k, v in item.items() if k not in {"id", "script", "sha256"}}
+        options = {k: v for k, v in item.items() if k not in {"id", "script", "sha256", "review_sha256"}}
+        if options.get("review_script"):
+            review_script = (config_path.parent / options["review_script"]).resolve(strict=True)
+            if hashlib.sha256(review_script.read_bytes()).hexdigest() != item.get("review_sha256"):
+                raise ValueError("Review script hash mismatch")
+            options["review_script"] = review_script
         for field in (
             "argument_template",
             "allowed_arguments",
             "allowed_switches",
             "benchmarks",
+            "review_argument_template",
         ):
             if field in options:
                 options[field] = tuple(options[field])
@@ -84,5 +91,11 @@ def mock_targets():
         timeout_seconds=3600,
         allowed_arguments=("--cases", "--note"),
         allowed_switches=("--include-log",),
+    )
+    targets["mock-visual-review"] = ScriptTarget(
+        Path(__file__).parent / "connectors" / "mock_visual_benchmark.py",
+        ("smoke", "two-samples"), result_mode="report",
+        review_script=Path(__file__).parent / "connectors" / "mock_visual_benchmark.py",
+        review_argument_template=("--eval", "{input_file}"),
     )
     return targets

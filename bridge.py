@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 import hmac
 import ipaddress
 import json
+import re
 from pathlib import Path
 import tempfile
 import time
@@ -31,7 +32,7 @@ class JobRequest(BaseModel):
     timeout_seconds: int = Field(default=300, ge=1, le=86400, strict=True)
     input: dict
     metadata: dict = Field(default_factory=dict)
-    input_artifacts: list = Field(default_factory=list, max_length=0)
+    input_artifacts: list[dict] = Field(default_factory=list, max_length=1)
 
 
 def error(code, message, status=400):
@@ -195,7 +196,7 @@ def create_app(token: str, *, data_dir=None, targets=None) -> FastAPI:
             "connector_id": "python-script",
             "connector_version": "1.0.0",
             "status": "ready",
-            "operations": ["run_benchmark"],
+            "operations": ["run_benchmark"] + (["finalize_report"] if target.review_script else []),
             "capabilities": ["execute", "cancel"],
             "max_concurrency": 1,
             "benchmarks": list(target.benchmarks),
@@ -242,9 +243,9 @@ def create_app(token: str, *, data_dir=None, targets=None) -> FastAPI:
         if not target:
             error("TARGET_NOT_FOUND", "Target not configured", 404)
         if (
-            body.operation != "run_benchmark"
+            body.operation not in {"run_benchmark", "finalize_report"}
             or not {"benchmark_id"} <= set(body.input)
-            or set(body.input) - {"benchmark_id", "arguments"}
+            or set(body.input) - {"benchmark_id", "arguments", "source_job_id"}
         ):
             error("INVALID_REQUEST", "Expected run_benchmark with benchmark_id", 422)
         if body.input["benchmark_id"] not in target.benchmarks:
@@ -256,6 +257,34 @@ def create_app(token: str, *, data_dir=None, targets=None) -> FastAPI:
                 "INVALID_REQUEST", "Run arguments are not allowed for this target", 422
             )
         manager = app.state.manager
+        if body.operation == "finalize_report":
+            import hashlib
+            from artifacts import safe
+            if not target.review_script or len(body.input_artifacts) != 1 or body.input.get("arguments"):
+                error("INVALID_REQUEST", "Report-only operation is not configured", 422)
+            source = manager.store.get(str(body.input.get("source_job_id", "")))
+            if (not source or source["target_id"] != body.target_id
+                    or source["operation"] != "run_benchmark" or source["status"] != "succeeded"
+                    or source["input"].get("benchmark_id") != body.input["benchmark_id"]
+                    or not ((source.get("result") or {}).get("output") or {}).get("requires_review")):
+                error("INVALID_REQUEST", "Invalid source generation job", 422)
+            artifact = body.input_artifacts[0]
+            if (set(artifact) != {"artifact_id", "sha256"}
+                    or not isinstance(artifact["artifact_id"], str)
+                    or not re.fullmatch(r"[a-f0-9]{32}", artifact["artifact_id"])
+                    or not isinstance(artifact["sha256"], str)
+                    or not re.fullmatch(r"[a-f0-9]{64}", artifact["sha256"])):
+                error("INVALID_REQUEST", "Invalid input artifact", 422)
+            row = manager.store.db.execute("SELECT body FROM artifacts WHERE id=?", (artifact["artifact_id"],)).fetchone()
+            stored = json.loads(row[0]) if row else {}
+            path = app.state.root / "artifacts" / artifact["artifact_id"]
+            if (not stored.get("name", "").lower().endswith(".xlsx")
+                    or stored.get("sha256") != artifact["sha256"] or not path.is_file()
+                    or not safe(path) or path.parent.resolve() != path.parent
+                    or hashlib.sha256(path.read_bytes()).hexdigest() != artifact["sha256"]):
+                error("INVALID_REQUEST", "Input workbook is unavailable or invalid", 422)
+        elif body.input_artifacts or "source_job_id" in body.input:
+            error("INVALID_REQUEST", "Generation jobs do not accept input artifacts", 422)
         if len(manager.tasks) >= 100 and not manager.store.by_key(body.idempotency_key):
             error("QUEUE_FULL", "Bridge queue is full", 429)
         try:

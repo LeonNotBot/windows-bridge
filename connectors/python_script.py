@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 import signal
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -40,6 +41,8 @@ class ScriptTarget:
     allowed_switches: tuple[str, ...] = ()
     working_dir: Path | None = None
     argument_mode: str | None = None
+    review_script: Path | None = None
+    review_argument_template: tuple[str, ...] = ("--eval", "{input_file}")
 
     def __post_init__(self):
         object.__setattr__(self, "script", self.script.resolve(strict=True))
@@ -70,6 +73,10 @@ class ScriptTarget:
             )
         if self.argument_mode not in {"allowlist", "passthrough"}:
             raise ValueError("Invalid argument mode")
+        if self.review_script is not None:
+            object.__setattr__(self, "review_script", Path(self.review_script).resolve(strict=True))
+            if not self.review_script.is_file() or self.result_mode != "report":
+                raise ValueError("Invalid review report script")
         reserved = self.reserved_arguments
         for flag in self.allowed_arguments + self.allowed_switches:
             if not re.fullmatch(r"--[a-zA-Z][a-zA-Z0-9_-]*", flag) or flag in reserved:
@@ -168,6 +175,7 @@ async def execute(
     arguments=None,
     collect_report=None,
     on_progress=None,
+    input_file=None,
 ):
     """Return a connector envelope containing the original benchmark response.
 
@@ -190,6 +198,10 @@ async def execute(
             "{output_dir}": directory,
             "{progress_file}": str(progress_path),
         }
+        if input_file is not None:
+            staged = Path(directory) / "reviewed.xlsx"
+            shutil.copyfile(input_file, staged)
+            substitutions["{input_file}"] = str(staged)
         if target.argument_template:
             values = []
             for value in target.argument_template:

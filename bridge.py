@@ -335,7 +335,14 @@ def create_app(token: str, *, data_dir=None, targets=None) -> FastAPI:
 
 def main():
     parser = argparse.ArgumentParser(description="Windows Bridge")
-    parser.add_argument("--token-file", required=True, type=Path)
+    parser.add_argument("--token-file", type=Path)
+    parser.add_argument("--control-url", help="Outbound mode: control-plane HTTPS origin")
+    parser.add_argument("--node-id", help="Administrator-created node ID")
+    parser.add_argument("--enrollment-code-file", type=Path)
+    parser.add_argument("--reenroll", action="store_true", help="Exchange a new code after administrator credential rotation")
+    parser.add_argument("--proxy-env", default="BRIDGE_AGENT_PROXY", help="Optional explicit HTTP/HTTPS proxy environment variable")
+    parser.add_argument("--credentials-file", type=Path, default=Path("secrets/node.json"))
+    parser.add_argument("--allow-insecure-local", action="store_true", help="Loopback development only")
     parser.add_argument(
         "--host", default="127.0.0.1",
         help="Listen IP (default: 127.0.0.1); set the LAN IP to accept remote Workers",
@@ -348,13 +355,31 @@ def main():
     args = parser.parse_args()
     try:
         host = validate_listen_host(args.host)
+        import secrets
+        import os
+        token = secrets.token_urlsafe(48) if args.control_url else args.token_file.read_text(encoding="utf-8").strip()
         app = create_app(
-            args.token_file.read_text(encoding="utf-8").strip(),
+            token,
             data_dir=args.data_dir,
             targets=mock_targets() if args.mock else load_targets(args.config),
         )
-    except (OSError, UnicodeError, ValueError):
+        agent = None
+        if args.control_url:
+            from outbound_agent import Agent
+            agent = Agent(app, token, origin=args.control_url, node_id=args.node_id,
+                credentials_file=args.credentials_file, enrollment_code_file=args.enrollment_code_file,
+                allow_insecure_local=args.allow_insecure_local, reenroll=args.reenroll,
+                proxy=os.environ.get(args.proxy_env) or None)
+    except (OSError, UnicodeError, ValueError, AttributeError, TypeError):
         parser.error("Invalid token file, target configuration or listen address")
+    if agent:
+        async def serve_agent():
+            async with app.router.lifespan_context(app):
+                await agent.run()
+        import logging
+        logging.basicConfig(level=logging.INFO)
+        asyncio.run(serve_agent())
+        return
     uvicorn.run(app, host=host, port=args.port, access_log=False)
 
 

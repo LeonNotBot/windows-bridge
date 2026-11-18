@@ -201,6 +201,7 @@ def create_app(token: str, *, data_dir=None, targets=None) -> FastAPI:
             "max_concurrency": 1,
             "benchmarks": list(target.benchmarks),
             "result_mode": target.result_mode,
+            "timeout_seconds": target.timeout_seconds,
             "argument_mode": target.argument_mode,
             "reserved_arguments": sorted(target.reserved_arguments),
             "allowed_arguments": list(target.allowed_arguments),

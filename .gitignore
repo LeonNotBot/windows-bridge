@@ -26,6 +26,7 @@ venv/
 *.zip
 config.json
 config.local.json
+/targets.json.backup-*
 
 # Keep documentation local; do not publish it in this repository.
 *.[mM][dD]

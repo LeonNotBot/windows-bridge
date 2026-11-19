@@ -1,0 +1,39 @@
+{
+  "targets": [
+    {
+      "id": "video-creator-real",
+      "script": "C:/edison/visual-gen-benchmark/bridge_run.py",
+      "sha256": "52871e8ef85f10474087371d7a9de74cad44a0e3eda6dcc7fc6c272cfc41dd06",
+      "benchmarks": [
+        "three-cases"
+      ],
+      "result_mode": "report",
+      "report_file": "report.md",
+      "timeout_seconds": 7200,
+      "argument_template": [
+        "--file",
+        "C:/edison/visual-gen-benchmark/testset/提示词测试集.xlsx",
+        "--out",
+        "{output_dir}",
+        "--progress-file",
+        "{progress_file}"
+      ],
+      "argument_mode": "allowlist",
+      "allowed_arguments": [
+        "--ids",
+        "--max-cases",
+        "--model-img",
+        "--model-vid",
+        "--timeout",
+        "--log-level",
+        "--heartbeat-interval",
+        "--poll-interval",
+        "--http-timeout"
+      ],
+      "allowed_switches": [
+        "--skip-optimize"
+      ],
+      "working_dir": "C:/edison/visual-gen-benchmark"
+    }
+  ]
+}

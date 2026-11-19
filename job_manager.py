@@ -48,7 +48,7 @@ class Manager:
                         raise ValueError("Input workbook failed integrity verification")
                     target = replace(target, script=target.review_script,
                                      argument_template=target.review_argument_template,
-                                     report_file="report.md")
+                                     report_file="report.md", output_directory_argument=None, report_files=())
 
                 async def progress(value):
                     if self.token:

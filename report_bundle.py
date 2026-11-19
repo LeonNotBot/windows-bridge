@@ -9,7 +9,7 @@ import stat
 import uuid
 
 from artifacts import LIMIT, TYPES
-from connectors.python_script import ProtocolError
+from connectors.python_script import ProtocolError, check_output_directory
 from job_store import now
 
 REPORT_TYPES = {".md": "markdown", ".html": "html", ".pdf": "pdf"}
@@ -23,6 +23,7 @@ def regular(path):
 
 
 def collect(directory, target, store, root):
+    directory = check_output_directory(directory)
     relative = Path(target.report_file)
     if (
         relative.is_absolute()
@@ -36,29 +37,39 @@ def collect(directory, target, store, root):
         raise ProtocolError("Main report is missing")
     paths = []
     total = 0
-    for folder, dirs, names in os.walk(directory, followlinks=False):
-        for name in dirs + names:
-            path = Path(folder) / name
-            info = path.lstat()
-            if (
-                stat.S_ISLNK(info.st_mode)
-                or getattr(info, "st_file_attributes", 0) & 0x400
-            ):
-                raise ProtocolError("Report directory contains a link or reparse point")
-        for name in names:
-            path = Path(folder) / name
-            if path in (
-                directory / "progress.json",
-                directory / "review.required",
-            ) or path.name.endswith(".tmp"):
-                continue
-            if not regular(path) or path.suffix.lower() not in TYPES:
-                raise ProtocolError("Unsupported report artifact")
-            size = path.stat().st_size
-            total += size
-            if size > LIMIT or total > 128 * 1024 * 1024 or len(paths) >= 100:
-                raise ProtocolError("Report bundle exceeds limits")
-            paths.append(path)
+    candidates = []
+    if target.report_files:
+        # Explicit files only: do not walk media, credentials or unrelated logs.
+        for name in dict.fromkeys(target.report_files):
+            path = directory / name
+            check_output_directory(path.parent)
+            if not path.exists() or not regular(path):
+                raise ProtocolError("Configured report file is missing or invalid")
+            candidates.append(path)
+    else:
+        for folder, dirs, names in os.walk(directory, followlinks=False):
+            for name in dirs + names:
+                path = Path(folder) / name
+                info = path.lstat()
+                if (
+                    stat.S_ISLNK(info.st_mode)
+                    or getattr(info, "st_file_attributes", 0) & 0x400
+                ):
+                    raise ProtocolError("Report directory contains a link or reparse point")
+            candidates.extend(Path(folder) / name for name in names)
+    for path in candidates:
+        if path in (
+            directory / "progress.json",
+            directory / "review.required",
+        ) or path.name.endswith(".tmp"):
+            continue
+        if not regular(path) or path.suffix.lower() not in TYPES:
+            raise ProtocolError("Unsupported report artifact")
+        size = path.stat().st_size
+        total += size
+        if size > LIMIT or total > 128 * 1024 * 1024 or len(paths) >= 100:
+            raise ProtocolError("Report bundle exceeds limits")
+        paths.append(path)
     if main not in paths or main.stat().st_size == 0:
         raise ProtocolError("Main report is empty")
     storage = root / "artifacts"

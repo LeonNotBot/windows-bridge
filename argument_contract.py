@@ -6,7 +6,19 @@ Synced into windows-bridge/argument_contract.py for standalone delivery.
 RESERVED_ARGUMENTS = frozenset({"--benchmark", "--output", "--output-dir", "--progress-file"})
 
 
-def validate_arguments(arguments, *, mode="allowlist", allowed=(), switches=(), reserved=()):
+def output_directory_value(arguments, flag):
+    values = []
+    for index, item in enumerate(arguments):
+        if item == flag:
+            values.append(arguments[index + 1] if index + 1 < len(arguments) else "")
+        elif item.startswith(flag + "="):
+            values.append(item[len(flag) + 1:])
+    if len(values) != 1 or not values[0].strip() or values[0].startswith("--"):
+        raise ValueError("A single output directory argument is required")
+    return values[0]
+
+
+def validate_arguments(arguments, *, mode="allowlist", allowed=(), switches=(), reserved=(), output_directory_argument=None):
     if mode not in {"allowlist", "passthrough"}:
         raise ValueError("Unsupported argument mode")
     if (
@@ -17,6 +29,8 @@ def validate_arguments(arguments, *, mode="allowlist", allowed=(), switches=(), 
         )
     ):
         raise ValueError("Invalid argument list")
+    if output_directory_argument:
+        output_directory_value(arguments, output_directory_argument)
     if mode == "passthrough":
         # A literal option token (including --option=value and long-option
         # abbreviations) must not override a platform-managed CLI argument.
@@ -24,7 +38,8 @@ def validate_arguments(arguments, *, mode="allowlist", allowed=(), switches=(), 
         for value in arguments:
             option = value.partition("=")[0]
             if option in protected or (
-                option.startswith("--") and any(name.startswith(option) for name in protected)
+                option.startswith("--") and option != output_directory_argument
+                and any(name.startswith(option) for name in protected)
             ):
                 raise ValueError("Platform-managed arguments cannot be overridden")
         return arguments

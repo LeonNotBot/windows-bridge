@@ -27,6 +27,7 @@ def load_targets(path):
             "working_dir",
             "argument_mode",
             "review_script", "review_sha256", "review_argument_template",
+            "output_directory_argument", "report_files",
         }:
             raise ValueError("Unknown target configuration field")
         key = item["id"]
@@ -50,6 +51,7 @@ def load_targets(path):
             "allowed_switches",
             "benchmarks",
             "review_argument_template",
+            "report_files",
         ):
             if field in options:
                 options[field] = tuple(options[field])

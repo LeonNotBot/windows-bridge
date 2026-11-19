@@ -206,6 +206,8 @@ def create_app(token: str, *, data_dir=None, targets=None) -> FastAPI:
             "reserved_arguments": sorted(target.reserved_arguments),
             "allowed_arguments": list(target.allowed_arguments),
             "allowed_switches": list(target.allowed_switches),
+            "output_directory_argument": target.output_directory_argument,
+            "required_arguments": [target.output_directory_argument] if target.output_directory_argument else [],
         }
 
     @app.get("/v1/targets")
@@ -252,7 +254,8 @@ def create_app(token: str, *, data_dir=None, targets=None) -> FastAPI:
         if body.input["benchmark_id"] not in target.benchmarks:
             error("INVALID_REQUEST", "Benchmark is not configured for this target", 422)
         try:
-            target.validate_arguments(body.input.get("arguments", []))
+            if body.operation == "run_benchmark":
+                target.validate_arguments(body.input.get("arguments", []))
         except ValueError:
             error(
                 "INVALID_REQUEST", "Run arguments are not allowed for this target", 422

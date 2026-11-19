@@ -7,16 +7,32 @@ from pathlib import Path
 import re
 import signal
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass, field
 from benchmark_contract import validate_benchmark, ContractError
-from argument_contract import RESERVED_ARGUMENTS, validate_arguments
+from argument_contract import RESERVED_ARGUMENTS, validate_arguments, output_directory_value
 
 
 class ProtocolError(ValueError):
     pass
+
+
+def check_output_directory(path, *, empty=False):
+    """Never follow links or collect a filesystem root as a business run."""
+    path = Path(path).absolute()
+    if path == Path(path.anchor) or path.resolve() != path:
+        raise ProtocolError("Invalid output directory")
+    for part in (path, *path.parents):
+        if part.exists() or part.is_symlink():
+            info = part.lstat()
+            if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+                raise ProtocolError("Invalid output directory")
+    if empty and path.exists() and any(path.iterdir()):
+        raise ProtocolError("Output directory must be new or empty")
+    return path
 
 
 def default_python():
@@ -43,6 +59,8 @@ class ScriptTarget:
     argument_mode: str | None = None
     review_script: Path | None = None
     review_argument_template: tuple[str, ...] = ("--eval", "{input_file}")
+    output_directory_argument: str | None = None
+    report_files: tuple[str, ...] = ()
 
     def __post_init__(self):
         object.__setattr__(self, "script", self.script.resolve(strict=True))
@@ -83,15 +101,34 @@ class ScriptTarget:
                 raise ValueError("Invalid or reserved user argument")
         if set(self.allowed_arguments) & set(self.allowed_switches):
             raise ValueError("Argument cannot be both a value and switch")
+        if self.output_directory_argument is not None:
+            flag = self.output_directory_argument
+            if (self.result_mode != "report" or not re.fullmatch(r"--[A-Za-z][A-Za-z0-9_-]*", flag)
+                    or flag in reserved or flag in self.allowed_switches
+                    or (self.argument_mode == "allowlist" and flag not in self.allowed_arguments)
+                    or not self.report_files):
+                raise ValueError("Invalid output directory argument")
+        for name in self.report_files:
+            if (not isinstance(name, str) or not name or Path(name).is_absolute()
+                    or any(part in {"", ".", ".."} for part in name.split("/"))
+                    or any(char in name for char in "\\:*?[]\0")):
+                raise ValueError("Invalid report file path")
+        if self.report_files and self.report_file not in self.report_files:
+            raise ValueError("Main report must be included in report_files")
 
     def validate_arguments(self, arguments):
-        return validate_arguments(
+        values = validate_arguments(
             arguments,
             mode=self.argument_mode,
             allowed=self.allowed_arguments,
             switches=self.allowed_switches,
             reserved=self.reserved_arguments,
+            output_directory_argument=self.output_directory_argument,
         )
+        return values
+
+    def output_directory_value(self, arguments):
+        return output_directory_value(arguments, self.output_directory_argument)
 
     @property
     def reserved_arguments(self):
@@ -191,6 +228,14 @@ async def execute(
             "INVALID_REQUEST", "Run arguments are not allowed for this target"
         )
     with tempfile.TemporaryDirectory(prefix="edison-benchmark-") as directory:
+        report_directory = Path(directory).resolve()
+        if target.output_directory_argument:
+            value = Path(target.output_directory_value(arguments))
+            report_directory = value if value.is_absolute() else (target.working_dir or target.script.parent) / value
+            try:
+                report_directory = check_output_directory(report_directory, empty=True)
+            except (ProtocolError, OSError):
+                return failure("INVALID_OUTPUT_DIRECTORY", "Output directory must be new or empty and must not contain links")
         output_path = Path(directory) / "result.json"
         progress_path = Path(directory) / "progress.json"
         substitutions = {
@@ -209,6 +254,8 @@ async def execute(
                     value = value.replace(key, replacement)
                 values.append(value)
             command = [target.python, str(target.script), *values, *arguments]
+        elif target.output_directory_argument:
+            command = [target.python, str(target.script), *arguments]
         else:
             command = [
                 target.python,
@@ -217,7 +264,7 @@ async def execute(
                 benchmark,
                 *arguments,
             ]
-        if target.result_mode == "report" and not target.argument_template:
+        if target.result_mode == "report" and not target.argument_template and not target.output_directory_argument:
             command.extend(
                 ["--output-dir", directory, "--progress-file", str(progress_path)]
             )
@@ -334,7 +381,8 @@ async def execute(
             if target.result_mode == "report":
                 if collect_report is None:
                     raise ProtocolError("Report collector required")
-                return await collect_report(Path(directory), target)
+                check_output_directory(report_directory)
+                return await collect_report(report_directory, target)
             if target.result_mode == "file":
                 if output_path.is_symlink() or not output_path.is_file():
                     raise ProtocolError("Result file is missing or invalid")
